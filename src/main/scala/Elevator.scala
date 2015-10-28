@@ -2,6 +2,8 @@ package elevator
 
 import akka.actor._
 
+import scala.collection.GenSetLike
+
 trait ElevatorControlSystem {
   def status(): Seq[(Int, Int, Int)]
   def update(elevatorId: Int, curFloor: Int, goalFloor: Int)
@@ -27,13 +29,6 @@ case object Down extends Direction
 case class PickupRequest(floor: Int, direction: Direction)
 case class DropoffRequest(floor: Int)
 
-object Elevator {
-  sealed trait State
-  case object Idle extends State
-  case object GoingUp extends State
-  case object GoingDown extends State
-}
-
 class Elevator(elevatorController: ActorRef) extends Actor {
 
   var currentFloor : Int = 0
@@ -44,14 +39,14 @@ class Elevator(elevatorController: ActorRef) extends Actor {
 
   // Going Up state
   def goingUp : Receive = {
-    case Tick => upTick()
+    case Tick => doTick(Up)
     case PickupRequest(floor, direction) => receiveActivePickup(floor, direction)
     case DropoffRequest(floor) => receiveActiveDropoff(floor)
   }
 
   // Going Down state
   def goingDown : Receive = {
-    case Tick => downTick()
+    case Tick => doTick(Down)
     case PickupRequest(floor, direction) => receiveActivePickup(floor, direction)
     case DropoffRequest(floor) => receiveActiveDropoff(floor)
 
@@ -65,46 +60,71 @@ class Elevator(elevatorController: ActorRef) extends Actor {
   }
 
   def idleRequest(floor: Int) = {
-    if (floor >= currentFloor) {
+    if (floor > currentFloor) {
       aboveRequests += floor
       context.become(goingUp)
-    } else {
+    } else if (floor < currentFloor) {
       belowRequests += floor
       context.become(goingDown)
     }
+    // if the floor requested is the current floor, the elevator does not move
   }
 
   def receiveActivePickup(floor: Int, direction: Direction) = direction match {
       case Up => aboveRequests += floor
       case Down => belowRequests += floor
+      case _ => throw new Exception("Unknown direction")
   }
 
   def receiveActiveDropoff(floor: Int) = {
-    if (floor >= currentFloor) {
+    if (floor > currentFloor) {
       aboveRequests += floor
     }
-    else {
+    else if (floor < currentFloor) {
       belowRequests += floor
     }
+    // if the floor requested is the current floor, the elevator does not queue up any requests
   }
 
-  def upTick() = {
-    if (aboveRequests.nonEmpty) {
-      if (currentFloor == aboveRequests.head) {
+  def doTick(direction: Direction) = {
+    val requestBuffer = direction match {
+      case Up => aboveRequests
+      case Down => belowRequests
+      case _ => throw new Exception("Unknown direction")
+    }
 
-      } else {
-        currentFloor += 1
+    lazy val otherBuffer = direction match {
+      case Up => belowRequests
+      case Down => aboveRequests
+      case _ => throw new Exception("Unknown direction")
+    }
+
+    lazy val otherActionState = direction match {
+      case Up => goingDown
+      case Down => goingUp
+      case _ => throw new Exception("Unknown direction")
+    }
+
+    if (requestBuffer.nonEmpty) {
+      direction match {
+        case Up => currentFloor += 1
+        case Down => currentFloor -= 1
+        case _ => throw new Exception("Unknown direction")
+      }
+
+      val head = requestBuffer.head
+      if (currentFloor == head) {
+        println(s"Opening on floor $currentFloor")
+        requestBuffer -= head
+        if (requestBuffer.isEmpty) {
+          if (otherBuffer.isEmpty) {
+            context.unbecome()
+          } else {
+            context.become(otherActionState)
+          }
+        }
       }
     }
   }
 
-  def downTick() = {
-    if (belowRequests.nonEmpty) {
-      if (currentFloor == belowRequests.head) {
-
-      } else {
-        currentFloor -= 1
-      }
-    }
-  }
 }
