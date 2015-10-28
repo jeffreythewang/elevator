@@ -2,34 +2,21 @@ package elevator
 
 import akka.actor._
 
-import scala.collection.GenSetLike
+object Elevator {
 
-trait ElevatorControlSystem {
-  def status(): Seq[(Int, Int, Int)]
-  def update(elevatorId: Int, curFloor: Int, goalFloor: Int)
-  def pickup(floor: Int, direction: Int)
-  def step()
+  sealed trait Direction
+  case object Up extends Direction
+  case object Down extends Direction
+
+  case class PickupRequest(floor: Int, direction: Direction)
+  case class DropoffRequest(floor: Int)
+
 }
 
-case object Tick
+class Elevator(elevatorId: Int, elevatorController: ActorRef) extends Actor {
 
-class ElevatorController(numElevators: Int) extends Actor {
-
-  val elevators = Vector.fill(numElevators)(context.actorOf(Props(new Elevator(self))))
-
-  def receive = {
-    case Tick => elevators.foreach{_ ! Tick}
-  }
-}
-
-sealed trait Direction
-case object Up extends Direction
-case object Down extends Direction
-
-case class PickupRequest(floor: Int, direction: Direction)
-case class DropoffRequest(floor: Int)
-
-class Elevator(elevatorController: ActorRef) extends Actor {
+  import ElevatorController._
+  import Elevator._
 
   var currentFloor : Int = 0
 
@@ -62,26 +49,34 @@ class Elevator(elevatorController: ActorRef) extends Actor {
   def idleRequest(floor: Int) = {
     if (floor > currentFloor) {
       aboveRequests += floor
+      elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, aboveRequests.lastOption.getOrElse(currentFloor), aboveRequests.size)
       context.become(goingUp)
     } else if (floor < currentFloor) {
       belowRequests += floor
+      elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, belowRequests.lastOption.getOrElse(currentFloor), belowRequests.size)
       context.become(goingDown)
     }
     // if the floor requested is the current floor, the elevator does not move
   }
 
   def receiveActivePickup(floor: Int, direction: Direction) = direction match {
-      case Up => aboveRequests += floor
-      case Down => belowRequests += floor
+      case Up =>
+        aboveRequests += floor
+        elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, aboveRequests.lastOption.getOrElse(currentFloor), aboveRequests.size)
+      case Down =>
+        belowRequests += floor
+        elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, belowRequests.lastOption.getOrElse(currentFloor), belowRequests.size)
       case _ => throw new Exception("Unknown direction")
   }
 
   def receiveActiveDropoff(floor: Int) = {
     if (floor > currentFloor) {
       aboveRequests += floor
+      elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, aboveRequests.lastOption.getOrElse(currentFloor), aboveRequests.size)
     }
     else if (floor < currentFloor) {
       belowRequests += floor
+      elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, belowRequests.lastOption.getOrElse(currentFloor), belowRequests.size)
     }
     // if the floor requested is the current floor, the elevator does not queue up any requests
   }
@@ -117,12 +112,17 @@ class Elevator(elevatorController: ActorRef) extends Actor {
         println(s"Opening on floor $currentFloor")
         requestBuffer -= head
         if (requestBuffer.isEmpty) {
+          elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, otherBuffer.lastOption.getOrElse(currentFloor), otherBuffer.size)
           if (otherBuffer.isEmpty) {
             context.unbecome()
           } else {
             context.become(otherActionState)
           }
+        } else {
+          elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, requestBuffer.lastOption.getOrElse(currentFloor), requestBuffer.size)
         }
+      } else {
+        elevatorController ! ElevatorStatusUpdate(elevatorId, currentFloor, requestBuffer.lastOption.getOrElse(currentFloor), requestBuffer.size)
       }
     }
   }
