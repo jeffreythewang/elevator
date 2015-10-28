@@ -1,6 +1,8 @@
 package elevator
 
 import akka.actor._
+import ElevatorController._
+import Elevator._
 
 case object Tick
 
@@ -15,9 +17,6 @@ object ElevatorController {
 }
 
 class ElevatorController(numElevators: Int) extends Actor {
-
-  import ElevatorController._
-  import Elevator._
 
   val elevators = scala.collection.mutable.Map[Int, ElevatorHandle]()
 
@@ -46,8 +45,20 @@ class ElevatorController(numElevators: Int) extends Actor {
     var closestElevator = elevators.getOrElse(0, ElevatorHandle(0, null, 0, 0, 0))
     elevators.values.foreach { elevator =>
       direction match {
-        case Up => if (elevator.curFloor <= floor && elevator.curFloor > closestElevator.curFloor) closestElevator = elevator
-        case Down => if (elevator.curFloor >= floor && elevator.curFloor < closestElevator.curFloor) closestElevator = elevator
+        case Up =>
+          if (elevator.curFloor - elevator.goalFloor <= 0) {
+            // For elevators currently going up
+            if (elevator.curFloor <= floor && elevator.curFloor > closestElevator.curFloor) {
+              closestElevator = elevator
+            }
+          }
+        case Down =>
+          if (elevator.curFloor - elevator.goalFloor >= 0) {
+            // For elevators currently going down
+            if (elevator.curFloor >= floor && elevator.curFloor < closestElevator.curFloor) {
+              closestElevator = elevator
+            }
+          }
       }
     }
     closestElevator.actorRef ! PickupRequest(floor, direction)
@@ -62,11 +73,42 @@ class ElevatorController(numElevators: Int) extends Actor {
 object ElevatorInterface {
 
   def main(args: Array[String]) = {
-    val numElevators = 1
+    if (args(0).toInt < 1 || args(0).toInt > 16) {
+      throw new Exception("Please choose between 1 and 16 actors")
+    }
+    val numElevators = args(0).toInt
     val system = ActorSystem("main")
     val elevatorController = system.actorOf(Props(new ElevatorController(numElevators)), name = "controller")
 
+    statusAll(elevatorController)
+    pickup(elevatorController, 5, Up)
+    tick(elevatorController)
+    pickup(elevatorController, 3, Up)
+    tick(elevatorController)
+    pickup(elevatorController, 1, Down)
+    tick(elevatorController)
+    statusAll(elevatorController)
+    tick(elevatorController)
+  }
+
+  def tick(elevatorController: ActorRef) = {
+    Thread.sleep(50)
     elevatorController ! Tick
   }
 
+  def statusAll(elevatorController: ActorRef) = {
+    elevatorController ! ElevatorStatusRequestAll
+  }
+
+  def statusById(elevatorController: ActorRef, elevatorId: Int) = {
+    elevatorController ! ElevatorStatusRequest(elevatorId)
+  }
+
+  def pickup(elevatorController: ActorRef, floor: Int, direction: Direction) = {
+    elevatorController ! PickupRequest(floor, direction)
+  }
+
+  def dropoff(elevatorController: ActorRef, elevatorId: Int, floor: Int) = {
+    elevatorController ! ClientDropoffRequest(elevatorId, floor)
+  }
 }

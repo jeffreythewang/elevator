@@ -1,6 +1,8 @@
 package elevator
 
 import akka.actor._
+import ElevatorController._
+import Elevator._
 
 object Elevator {
 
@@ -14,9 +16,6 @@ object Elevator {
 }
 
 class Elevator(elevatorId: Int, elevatorController: ActorRef) extends Actor {
-
-  import ElevatorController._
-  import Elevator._
 
   var currentFloor : Int = 0
 
